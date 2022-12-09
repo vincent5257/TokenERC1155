@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: MIT
+// OpenZeppelin Contracts v4.4.1 (utils/introspection/IERC165.sol)
+
+pragma solidity ^0.8.0;
+
+/**
+ * @dev Interface of the ERC165 standard, as defined in the
+ * [EIP](https://eips.ethereum.org/EIPS/eip-165).
+ *
+ * Implementers can declare support of contract interfaces, which can then be
+ * queried by others ({ERC165Checker}).
+ *
+ * For an implementation, see {ERC165}.
+ */
+interface IERC165 {
+    /**
+     * @dev Returns true if this contract implements the interface defined by
+     * `interfaceId`. See the corresponding
+     * [EIP section](https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified)
+     * to learn more about how these ids are created.
+     *
+     * This function call must use less than 30 000 gas.
+     */
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
+}
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity ^0.8.0;
+
+/**
+ * @title ERC20 interface
+ * @dev see https://github.com/ethereum/EIPs/issues/20
+ */
+interface IERC20 {
+    function totalSupply() external view returns (uint256);
+
+    function balanceOf(address who) external view returns (uint256);
+
+    function allowance(address owner, address spender) external view returns (uint256);
+
+    function transfer(address to, uint256 value) external returns (bool);
+
+    function approve(address spender, uint256 value) external returns (bool);
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 value
+    ) external returns (bool);
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+    
+}
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity ^0.8.0;
+
+/**
+ *  Thirdweb's `PlatformFee` is a contract extension to be used with any base contract. It exposes functions for setting and reading
+ *  the recipient of platform fee and the platform fee basis points, and lets the inheriting contract perform conditional logic
+ *  that uses information about platform fees, if desired.
+ */
+
+interface IPlatformFee {
+    /// @dev Returns the platform fee bps and recipient.
+    function getPlatformFeeInfo() external view returns (address, uint16);
+
+    /// @dev Lets a module admin update the fees on primary sales.
+    function setPlatformFeeInfo(address _platformFeeRecipient, uint256 _platformFeeBps) external;
+
+    /// @dev Emitted when fee on primary sales is updated.
+    event PlatformFeeInfoUpdated(address indexed platformFeeRecipient, uint256 platformFeeBps);
+}
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity ^0.8.0;
+
+// Helper interfaces
+import { IWETH } from "../interfaces/IWETH.sol";
+
+import "../openzeppelin-presets/token/ERC20/utils/SafeERC20.sol";
+
+library CurrencyTransferLib {
+    using SafeERC20 for IERC20;
+
+    /// @dev The address interpreted as native token of the chain.
+    address public constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    /// @dev Transfers a given amount of currency.
+    function transferCurrency(
+        address _currency,
+        address _from,
+        address _to,
+        uint256 _amount
+    ) internal {
+        if (_amount == 0) {
+            return;
+        }
+
+        if (_currency == NATIVE_TOKEN) {
+            safeTransferNativeToken(_to, _amount);
+        } else {
+            safeTransferERC20(_currency, _from, _to, _amount);
+        }
+    }
+
+    /// @dev Transfers a given amount of currency. (With native token wrapping)
+    function transferCurrencyWithWrapper(
+        address _currency,
+        address _from,
+        address _to,
+        uint256 _amount,
+        address _nativeTokenWrapper
+    ) internal {
+        if (_amount == 0) {
+            return;
+        }
+
+        if (_currency == NATIVE_TOKEN) {
+            if (_from == address(this)) {
+                // withdraw from weth then transfer withdrawn native token to recipient
+                IWETH(_nativeTokenWrapper).withdraw(_amount);
+                safeTransferNativeTokenWithWrapper(_to, _amount, _nativeTokenWrapper);
+            } else if (_to == address(this)) {
+                // store native currency in weth
+                require(_amount == msg.value, "msg.value != amount");
+                IWETH(_nativeTokenWrapper).deposit{ value: _amount }();
+            } else {
+                safeTransferNativeTokenWithWrapper(_to, _amount, _nativeTokenWrapper);
+            }
+        } else {
+            safeTransferERC20(_currency, _from, _to, _amount);
+        }
+    }
+
+    /// @dev Transfer `amount` of ERC20 token from `from` to `to`.
+    function safeTransferERC20(
+        address _currency,
+        address _from,
+        address _to,
+        uint256 _amount
+    ) internal {
+        if (_from == _to) {
+            return;
+        }
+
+        if (_from == address(this)) {
+            IERC20(_currency).safeTransfer(_to, _amount);
+        } else {
+            IERC20(_currency).safeTransferFrom(_from, _to, _amount);
+        }
+    }
+
+    /// @dev Transfers `amount` of native token to `to`.
+    function safeTransferNativeToken(address to, uint256 value) internal {
+        // solhint-disable avoid-low-level-calls
+        // slither-disable-next-line low-level-calls
+        (bool success, ) = to.call{ value: value }("");
+        require(success, "native token transfer failed");
+    }
+
+    /// @dev Transfers `amount` of native token to `to`. (With native token wrapping)
+    function safeTransferNativeTokenWithWrapper(
+        address to,
+        uint256 value,
+        address _nativeTokenWrapper
+    ) internal {
+        // solhint-disable avoid-low-level-calls
+        // slither-disable-next-line low-level-calls
+        (bool success, ) = to.call{ value: value }("");
+        if (!success) {
+            IWETH(_nativeTokenWrapper).deposit{ value: value }();
+            IERC20(_nativeTokenWrapper).safeTransfer(to, value);
+        }
+    }
+}
